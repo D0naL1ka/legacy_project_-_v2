@@ -1,0 +1,9 @@
+# requirements.txt
+# last updated: sometime in 2022
+
+# no external dependencies currently
+# (removed requests library after security audit)
+# pytest for testing
+pytest>=7.0
+pylint>=2.0
+radon>=5.0

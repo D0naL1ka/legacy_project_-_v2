@@ -1,0 +1,25 @@
+[MASTER]
+ignore=tests
+
+[MESSAGES CONTROL]
+# Enable all checks for teaching purposes
+
+[FORMAT]
+max-line-length=100
+indent-string='    '
+
+[DESIGN]
+max-args=7
+max-locals=20
+max-returns=6
+max-branches=12
+max-statements=50
+max-parents=7
+max-attributes=10
+min-public-methods=1
+max-public-methods=20
+
+[SIMILARITIES]
+min-similarity-lines=4
+ignore-comments=yes
+ignore-docstrings=yes
