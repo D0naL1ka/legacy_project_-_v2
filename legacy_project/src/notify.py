@@ -3,7 +3,10 @@
 # DEPRECATED - use new_notify.py (which doesn't exist yet)
 # kept for reference
 
+import datetime
 import smtplib
+import sys
+import time
 # from email.mime.text import MIMEText  # commented out - breaks on server
 
 # config (move to env someday)
@@ -11,6 +14,10 @@ SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
 SMTP_USER = "system@company.com"
 SMTP_PASS = "qwerty123"  # yeah yeah, I know
+
+# bulk_notify retry settings (CR-014)
+BULK_RETRIES = 2        # retries after the first failed attempt
+BULK_RETRY_DELAY = 1.0  # seconds to wait between attempts
 
 
 def send_email(to, subj, body):
@@ -35,7 +42,6 @@ def send_email(to, subj, body):
 
 
 def notify_user(user_id, msg_type, data=None):
-    # types: 1=order_confirmed, 2=payment_received, 3=order_cancelled
     if msg_type == 1:
         send_email(
             data.get('email', ''),
@@ -59,19 +65,46 @@ def notify_user(user_id, msg_type, data=None):
     #     send_sms(...)
 
 
-def bulk_notify(users, msg):
-    # used once in 2021 for promo campaign, kept just in case
-    sent = 0
-    failed = 0
-    for u in users:
+def _send_with_retry(user, email, msg, retries, delay):
+    user_id = user.get('id')
+    attempts = max(0, retries) + 1
+    for attempt in range(1, attempts + 1):
         try:
-            send_email(u.get('email', ''), "Notification", msg)
+            send_email(email, "Notification", msg)
+            return True
+        except Exception as exc:
+            if attempt < attempts:
+                log_notification(
+                    user_id, "bulk",
+                    f"error on attempt {attempt}, retry in {delay}s: {exc}")
+                time.sleep(delay)
+            else:
+                log_notification(
+                    user_id, "bulk",
+                    f"failed after {attempts} attempts: {exc}")
+    return False
+
+
+def bulk_notify(users, msg, retries=BULK_RETRIES, delay=BULK_RETRY_DELAY):
+    sent = 0
+    failed_emails = []
+    for u in users:
+        email = u.get('email', '')
+        if _send_with_retry(u, email, msg, retries, delay):
             sent += 1
-        except Exception:
-            failed += 1
-    return {"sent": sent, "failed": failed}
+        else:
+            failed_emails.append(email)
+    return {
+        "sent": sent,
+        "failed": len(failed_emails),
+        "failed_emails": failed_emails,
+    }
 
 
 def log_notification(user_id, tp, status):
-    # TODO: write to DB (never implemented)
-    pass
+    # persistence to DB is out of scope of CR-014
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(
+        f"[NOTIFY] {timestamp} user_id={user_id} type={tp} status={status}",
+        file=sys.stderr,
+    )
