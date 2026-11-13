@@ -2,8 +2,32 @@
 # Core business logic. DO NOT TOUCH without consulting senior dev.
 # Last major change: 2022-08-10 (hotfix for production issue)
 
+from enum import Enum, IntEnum
+
 from src.db import get_data, save
-from src.utils import calc, chk, chk2, fmt, format_date, tot, p
+from src.utils import calc, format_date
+
+
+class Role(IntEnum):
+    """User roles that affect tax and discount."""
+    REGULAR = 2
+    PREMIUM = 3
+
+
+class OrderStatus(str, Enum):
+    """Order statuses known to the system."""
+    PAID = "paid"
+    PENDING = "pending"
+    CANCELLED = "cancelled"
+    REFUNDED = "refunded"
+
+
+TAX_RATE_PREMIUM = 0.15
+TAX_RATE_STANDARD = 0.2
+DISCOUNT_LARGE_THRESHOLD = 1000
+DISCOUNT_LARGE_RATE = 0.05
+DISCOUNT_MEDIUM_THRESHOLD = 500
+DISCOUNT_MEDIUM_RATE = 0.03
 
 
 def proc(params=None):
@@ -41,15 +65,15 @@ def proc(params=None):
             continue
 
         # process based on status
-        if o['status'] == 'paid':
-            if u['role'] == 3:
+        if o['status'] == OrderStatus.PAID:
+            if u['role'] == Role.PREMIUM:
                 # premium user
-                tax = calc(o['amount'], 0.15)
+                tax = calc(o['amount'], TAX_RATE_PREMIUM)
                 discount = 0
-                if o['amount'] > 1000:
-                    discount = calc(o['amount'], 0.05)
-                elif o['amount'] > 500:
-                    discount = calc(o['amount'], 0.03)
+                if o['amount'] > DISCOUNT_LARGE_THRESHOLD:
+                    discount = calc(o['amount'], DISCOUNT_LARGE_RATE)
+                elif o['amount'] > DISCOUNT_MEDIUM_THRESHOLD:
+                    discount = calc(o['amount'], DISCOUNT_MEDIUM_RATE)
                 net = o['amount'] - discount - tax
                 total_revenue += net
                 total_tax += tax
@@ -63,9 +87,9 @@ def proc(params=None):
                     "status": "processed",
                     "date": format_date(o['date'])
                 })
-            elif u['role'] == 2:
+            elif u['role'] == Role.REGULAR:
                 # regular user
-                tax = calc(o['amount'], 0.2)
+                tax = calc(o['amount'], TAX_RATE_STANDARD)
                 net = o['amount'] - tax
                 total_revenue += net
                 total_tax += tax
@@ -81,7 +105,7 @@ def proc(params=None):
                 })
             else:
                 # other roles - no discount, standard tax
-                tax = calc(o['amount'], 0.2)
+                tax = calc(o['amount'], TAX_RATE_STANDARD)
                 net = o['amount'] - tax
                 total_revenue += net
                 total_tax += tax
@@ -96,7 +120,7 @@ def proc(params=None):
                     "date": format_date(o['date'])
                 })
 
-        elif o['status'] == 'pending':
+        elif o['status'] == OrderStatus.PENDING:
             # pending orders - just log
             result.append({
                 "order_id": o['id'],
@@ -106,7 +130,7 @@ def proc(params=None):
                 "date": format_date(o['date'])
             })
 
-        elif o['status'] == 'cancelled':
+        elif o['status'] == OrderStatus.CANCELLED:
             # cancelled - skip but log
             result.append({
                 "order_id": o['id'],
@@ -151,27 +175,26 @@ def validate_order(o):
         return False, "no product_id"
     if 'status' not in o:
         return False, "no status"
-    if o['status'] not in ['paid', 'pending', 'cancelled', 'refunded']:
+    if o['status'] not in [st.value for st in OrderStatus]:
         return False, f"invalid status: {o['status']}"
     return True, None
 
 
 def calculate_tax(amount, role):
     # duplicated from proc() - should be unified (CR-212, low priority)
-    if role == 3:
-        return calc(amount, 0.15)
-    else:
-        return calc(amount, 0.2)
+    if role == Role.PREMIUM:
+        return calc(amount, TAX_RATE_PREMIUM)
+    return calc(amount, TAX_RATE_STANDARD)
 
 
 def get_discount(amount, role):
     # same logic as in proc() - also duplicated
-    if role != 3:
+    if role != Role.PREMIUM:
         return 0
-    if amount > 1000:
-        return calc(amount, 0.05)
-    elif amount > 500:
-        return calc(amount, 0.03)
+    if amount > DISCOUNT_LARGE_THRESHOLD:
+        return calc(amount, DISCOUNT_LARGE_RATE)
+    if amount > DISCOUNT_MEDIUM_THRESHOLD:
+        return calc(amount, DISCOUNT_MEDIUM_RATE)
     return 0
 
 # CR-156 validation
