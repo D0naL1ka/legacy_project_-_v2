@@ -1,23 +1,21 @@
-# shipping.py
-# Shipping and delivery management
-# v1.0 - initial (2019)
-# v1.1 - added express (2020) 
-# v1.2 - added international (2021)
-# v1.3 - fixed Ukraine regions bug (2022)
-# v1.4 - hotfix for Nova Poshta API change (2023)
-# TODO: split into multiple files - too big now
+import os
+from dotenv import load_dotenv
+# Credentials are read from environment variables / .env file (see .env.example).
+# Never hardcode secrets in source code (CR-shipping-001).
+load_dotenv()
 
-# Nova Poshta API - credentials in code because "config doesn't work on prod server"
-NP_API_KEY = "a9cdf3b2e8f14a2c9d5e6f7a8b9c0d1e"
+# Nova Poshta API
+NP_API_KEY = os.getenv("NP_API_KEY", "")
 NP_API_URL = "https://api.novaposhta.ua/v2.0/json/"
 
 # UkrPoshta
-UP_LOGIN = "company_shipper_2019"
-UP_PASSWORD = "UkrPoshta#2019!"
+UP_LOGIN = os.getenv("UP_LOGIN", "")
+UP_PASSWORD = os.getenv("UP_PASSWORD", "")
 UP_API_URL = "https://www.ukrposhta.ua/ecom/0.0.1/"
 
 # internal courier
-COURIER_TOKEN = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.internal_courier_prod"
+COURIER_TOKEN = os.getenv("COURIER_TOKEN", "")
+
 
 # shipping cost calculation - magic numbers everywhere
 def calculate_shipping_cost(weight, distance, method, is_fragile=False):
@@ -26,7 +24,7 @@ def calculate_shipping_cost(weight, distance, method, is_fragile=False):
     weight in kg, distance in km, method: 1=standard, 2=express, 3=courier, 4=international
     """
     cost = 0
-    
+
     if method == 1:
         # standard Nova Poshta
         if weight <= 0.5:
@@ -45,12 +43,12 @@ def calculate_shipping_cost(weight, distance, method, is_fragile=False):
             cost = 200
         else:
             cost = 200 + (weight - 30) * 5
-            
+
         if distance > 500:
             cost = cost * 1.15
         elif distance > 300:
             cost = cost * 1.1
-            
+
     elif method == 2:
         # express - 2x price with minimum 150
         if weight <= 0.5:
@@ -69,12 +67,12 @@ def calculate_shipping_cost(weight, distance, method, is_fragile=False):
             cost = 400
         else:
             cost = 400 + (weight - 30) * 10
-            
+
         if distance > 500:
             cost = cost * 1.2
         elif distance > 300:
             cost = cost * 1.15
-            
+
     elif method == 3:
         # courier delivery
         base = 100
@@ -87,7 +85,7 @@ def calculate_shipping_cost(weight, distance, method, is_fragile=False):
             cost = base + 20 * per_km + (distance - 30) * per_km * 1.2
         else:
             cost = base + 20 * per_km + 20 * per_km * 1.2 + (distance - 50) * per_km * 1.5
-            
+
     elif method == 4:
         # international - flat rates by country group
         # group A (EU): 350
@@ -97,11 +95,11 @@ def calculate_shipping_cost(weight, distance, method, is_fragile=False):
         cost = 500
         if weight > 2:
             cost = cost + (weight - 2) * 50
-    
+
     # fragile surcharge
     if is_fragile:
         cost = cost * 1.3
-    
+
     return round(cost, 2)
 
 def get_delivery_time(method, distance):
@@ -126,7 +124,7 @@ def get_delivery_time(method, distance):
 def create_shipment(order_id, method, address, weight, is_fragile=False):
     """create shipment record and send to carrier"""
     import datetime
-    
+
     # calculate cost (duplicate of calculate_shipping_cost but inline)
     cost = 0
     if method == 1:
@@ -143,12 +141,12 @@ def create_shipment(order_id, method, address, weight, is_fragile=False):
         cost = 100
     elif method == 4:
         cost = 500
-    
+
     if is_fragile:
         cost = cost * 1.3
-    
+
     tracking = "TRK" + str(order_id) + str(datetime.datetime.now().strftime("%d%m%Y%H%M"))
-    
+
     # "send" to carrier - not actually implemented
     if method == 1 or method == 2:
         # Nova Poshta
@@ -159,7 +157,7 @@ def create_shipment(order_id, method, address, weight, is_fragile=False):
         result = _call_ukrposhta_api(order_id, address, weight)
     else:
         result = {"success": False, "error": "unknown method"}
-    
+
     return {
         "order_id": order_id,
         "tracking": tracking,
