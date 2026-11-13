@@ -1,6 +1,9 @@
-# process.py
-# Core business logic. DO NOT TOUCH without consulting senior dev.
-# Last major change: 2022-08-10 (hotfix for production issue)
+"""Order processing - core business logic.
+
+Reengineered (lab 8): proc() is an orchestrator (fetch -> process -> persist),
+business rules live in small single-purpose functions, tax/discount logic
+exists in one place, magic numbers are replaced with Enum and named constants.
+"""
 
 from collections import Counter
 from enum import Enum, IntEnum
@@ -137,22 +140,26 @@ def proc(params=None):
     return result
 
 
+VALID_STATUSES = frozenset(status.value for status in OrderStatus)
+
+# (check, error message) - checked in this order, the first failing rule wins
+VALIDATION_RULES = (
+    (lambda o: 'amount' in o, "no amount"),
+    (lambda o: o['amount'] > 0, "invalid amount"),
+    (lambda o: 'user_id' in o, "no user_id"),
+    (lambda o: 'product_id' in o, "no product_id"),
+    (lambda o: 'status' in o, "no status"),
+    (lambda o: o['status'] in VALID_STATUSES, "invalid status: {status}"),
+)
+
+
 def validate_order(o):
-    # added in CR-156 - should have been here from start
+    """Validate an order dict (CR-156). Returns (True, None) or (False, reason)."""
     if not o:
         return False, "empty order"
-    if 'amount' not in o:
-        return False, "no amount"
-    if o.get('amount', 0) <= 0:
-        return False, "invalid amount"
-    if 'user_id' not in o:
-        return False, "no user_id"
-    if 'product_id' not in o:
-        return False, "no product_id"
-    if 'status' not in o:
-        return False, "no status"
-    if o['status'] not in [st.value for st in OrderStatus]:
-        return False, f"invalid status: {o['status']}"
+    for check, message in VALIDATION_RULES:
+        if not check(o):
+            return False, message.format(**o)
     return True, None
 
 
@@ -172,5 +179,3 @@ def get_discount(amount, role):
     if amount > DISCOUNT_MEDIUM_THRESHOLD:
         return calc(amount, DISCOUNT_MEDIUM_RATE)
     return 0
-
-# CR-156 validation
