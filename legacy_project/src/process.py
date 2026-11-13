@@ -66,59 +66,21 @@ def proc(params=None):
 
         # process based on status
         if o['status'] == OrderStatus.PAID:
-            if u['role'] == Role.PREMIUM:
-                # premium user
-                tax = calc(o['amount'], TAX_RATE_PREMIUM)
-                discount = 0
-                if o['amount'] > DISCOUNT_LARGE_THRESHOLD:
-                    discount = calc(o['amount'], DISCOUNT_LARGE_RATE)
-                elif o['amount'] > DISCOUNT_MEDIUM_THRESHOLD:
-                    discount = calc(o['amount'], DISCOUNT_MEDIUM_RATE)
-                net = o['amount'] - discount - tax
-                total_revenue += net
-                total_tax += tax
-                result.append({
-                    "order_id": o['id'],
-                    "user": u['name'],
-                    "amount": o['amount'],
-                    "discount": discount,
-                    "tax": tax,
-                    "net": net,
-                    "status": "processed",
-                    "date": format_date(o['date'])
-                })
-            elif u['role'] == Role.REGULAR:
-                # regular user
-                tax = calc(o['amount'], TAX_RATE_STANDARD)
-                net = o['amount'] - tax
-                total_revenue += net
-                total_tax += tax
-                result.append({
-                    "order_id": o['id'],
-                    "user": u['name'],
-                    "amount": o['amount'],
-                    "discount": 0,
-                    "tax": tax,
-                    "net": net,
-                    "status": "processed",
-                    "date": format_date(o['date'])
-                })
-            else:
-                # other roles - no discount, standard tax
-                tax = calc(o['amount'], TAX_RATE_STANDARD)
-                net = o['amount'] - tax
-                total_revenue += net
-                total_tax += tax
-                result.append({
-                    "order_id": o['id'],
-                    "user": u['name'],
-                    "amount": o['amount'],
-                    "discount": 0,
-                    "tax": tax,
-                    "net": net,
-                    "status": "processed",
-                    "date": format_date(o['date'])
-                })
+            tax = calculate_tax(o['amount'], u['role'])
+            discount = get_discount(o['amount'], u['role'])
+            net = o['amount'] - discount - tax
+            total_revenue += net
+            total_tax += tax
+            result.append({
+                "order_id": o['id'],
+                "user": u['name'],
+                "amount": o['amount'],
+                "discount": discount,
+                "tax": tax,
+                "net": net,
+                "status": "processed",
+                "date": format_date(o['date'])
+            })
 
         elif o['status'] == OrderStatus.PENDING:
             # pending orders - just log
@@ -181,14 +143,14 @@ def validate_order(o):
 
 
 def calculate_tax(amount, role):
-    # duplicated from proc() - should be unified (CR-212, low priority)
+    """Tax for an order amount: premium rate for premium users, standard otherwise."""
     if role == Role.PREMIUM:
         return calc(amount, TAX_RATE_PREMIUM)
     return calc(amount, TAX_RATE_STANDARD)
 
 
 def get_discount(amount, role):
-    # same logic as in proc() - also duplicated
+    """Discount for premium users by amount thresholds (single source of truth)."""
     if role != Role.PREMIUM:
         return 0
     if amount > DISCOUNT_LARGE_THRESHOLD:
