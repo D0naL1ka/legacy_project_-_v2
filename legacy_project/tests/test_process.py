@@ -195,3 +195,33 @@ def test_process_order_unknown_status_is_error():
                                            process._index_by_id(PRODUCTS))
     assert record is None
     assert error == {"order_id": 1, "error": "unknown status: refunded"}
+
+
+# ---------- process_orders() / build_summary(): no DB, no mocks (iteration 4) ----------
+
+def test_process_orders_is_pure():
+    with mock.patch("src.process.get_data") as get_data, mock.patch("src.process.save") as save:
+        result = process.process_orders(ORDERS, USERS, PRODUCTS)
+    get_data.assert_not_called()
+    save.assert_not_called()
+    assert result["summary"]["total_revenue"] == 2272.0
+
+
+def test_build_summary_counts_and_totals():
+    records = [
+        {"status": "processed", "net": 80.0, "tax": 20.0},
+        {"status": "processed", "net": 0.1, "tax": 0.2},
+        {"status": "pending"},
+        {"status": "cancelled"},
+    ]
+    s = process.build_summary(records, [{"order_id": 1, "error": "x"}])
+    assert (s["processed"], s["pending"], s["cancelled"]) == (2, 1, 1)
+    assert s["total_revenue"] == 80.1
+    assert s["total_tax"] == 20.2
+    assert len(s["errors"]) == 1
+
+
+def test_build_summary_empty():
+    assert process.build_summary([], []) == {
+        "processed": 0, "pending": 0, "cancelled": 0,
+        "total_revenue": 0, "total_tax": 0, "errors": []}

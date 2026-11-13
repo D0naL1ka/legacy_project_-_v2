@@ -2,6 +2,7 @@
 # Core business logic. DO NOT TOUCH without consulting senior dev.
 # Last major change: 2022-08-10 (hotfix for production issue)
 
+from collections import Counter
 from enum import Enum, IntEnum
 
 from src.db import get_data, save
@@ -94,40 +95,46 @@ def _process_order(order, users_by_id, products_by_id):
     return handler(order, user), None
 
 
-def proc(params=None):
-    """process orders - main business flow"""
-    orders = get_data("orders")
-    users_by_id = _index_by_id(get_data("users"))
-    products_by_id = _index_by_id(get_data("products"))
-
-    result = []
-    errors = []
-    total_revenue = 0
-    total_tax = 0
-
-    for o in orders:
-        record, error = _process_order(o, users_by_id, products_by_id)
-        if error:
-            errors.append(error)
-            continue
-        if record['status'] == 'processed':
-            total_revenue += record['net']
-            total_tax += record['tax']
-        result.append(record)
-
-    summary = {
-        "processed": len([r for r in result if r['status'] == 'processed']),
-        "pending": len([r for r in result if r['status'] == 'pending']),
-        "cancelled": len([r for r in result if r['status'] == 'cancelled']),
-        "total_revenue": round(total_revenue, 2),
-        "total_tax": round(total_tax, 2),
-        "errors": errors
+def build_summary(records, errors):
+    """Count records by status and total revenue/tax of processed orders."""
+    counts = Counter(r['status'] for r in records)
+    processed = [r for r in records if r['status'] == 'processed']
+    return {
+        "processed": counts['processed'],
+        "pending": counts['pending'],
+        "cancelled": counts['cancelled'],
+        "total_revenue": round(sum(r['net'] for r in processed), 2),
+        "total_tax": round(sum(r['tax'] for r in processed), 2),
+        "errors": errors,
     }
 
-    save("processed_orders", result)
-    save("summary", summary)
 
-    return {"orders": result, "summary": summary}
+def process_orders(orders, users, products):
+    """Pure business logic: no DB access, data is passed in (easy to test)."""
+    users_by_id = _index_by_id(users)
+    products_by_id = _index_by_id(products)
+    records, errors = [], []
+    for order in orders:
+        record, error = _process_order(order, users_by_id, products_by_id)
+        if error:
+            errors.append(error)
+        else:
+            records.append(record)
+    return {"orders": records, "summary": build_summary(records, errors)}
+
+
+def proc(params=None):
+    """Orchestrator: fetch data -> process orders -> persist the result.
+
+    ``params`` is kept for backward compatibility (main.py calls proc(d))
+    and is not used.
+    """
+    del params  # reserved, see docstring
+    result = process_orders(get_data("orders"), get_data("users"),
+                            get_data("products"))
+    save("processed_orders", result["orders"])
+    save("summary", result["summary"])
+    return result
 
 
 def validate_order(o):
