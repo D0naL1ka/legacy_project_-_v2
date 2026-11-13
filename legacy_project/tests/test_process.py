@@ -1,3 +1,7 @@
+# tests/test_process.py
+# Characterization + unit tests for src/process.py (reengineering, lab 8, variant 2).
+# The DB layer (get_data / save) is replaced with mocks, so no data/ files are needed.
+
 import os
 import sys
 from unittest import mock
@@ -6,7 +10,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from src import process
+from src import process  # noqa: E402
 
 USERS = [
     {"id": 1, "name": "Premium User", "role": 3},
@@ -167,3 +171,27 @@ def without(key):
 ])
 def test_validate_order(order, expected):
     assert process.validate_order(order) == expected
+
+
+# ---------- unit tests for extracted helpers (iteration 3) ----------
+
+def test_index_by_id():
+    assert process._index_by_id(USERS)[2]["name"] == "Regular User"
+    assert process._index_by_id([]) == {}
+
+
+@pytest.mark.parametrize("order_id, expected_status", [(1, "processed"), (6, "pending"), (7, "cancelled")])
+def test_process_order_dispatches_by_status(order_id, expected_status):
+    order = next(o for o in ORDERS if o["id"] == order_id)
+    record, error = process._process_order(order, process._index_by_id(USERS),
+                                           process._index_by_id(PRODUCTS))
+    assert error is None
+    assert record["status"] == expected_status
+
+
+def test_process_order_unknown_status_is_error():
+    order = {**ORDERS[0], "status": "refunded"}
+    record, error = process._process_order(order, process._index_by_id(USERS),
+                                           process._index_by_id(PRODUCTS))
+    assert record is None
+    assert error == {"order_id": 1, "error": "unknown status: refunded"}

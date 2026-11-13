@@ -30,11 +30,75 @@ DISCOUNT_MEDIUM_THRESHOLD = 500
 DISCOUNT_MEDIUM_RATE = 0.03
 
 
+def _index_by_id(items):
+    """Build {id: item} for O(1) lookup instead of a linear search per order."""
+    return {item['id']: item for item in items}
+
+
+def _paid_record(order, user):
+    """Record for a paid order: tax and discount depend on the user's role."""
+    tax = calculate_tax(order['amount'], user['role'])
+    discount = get_discount(order['amount'], user['role'])
+    return {
+        "order_id": order['id'],
+        "user": user['name'],
+        "amount": order['amount'],
+        "discount": discount,
+        "tax": tax,
+        "net": order['amount'] - discount - tax,
+        "status": "processed",
+        "date": format_date(order['date']),
+    }
+
+
+def _pending_record(order, user):
+    """Record for a pending order: logged without any calculation."""
+    return {
+        "order_id": order['id'],
+        "user": user['name'],
+        "amount": order['amount'],
+        "status": "pending",
+        "date": format_date(order['date']),
+    }
+
+
+def _cancelled_record(order, user):
+    """Record for a cancelled order: amount is reported as 0."""
+    return {
+        "order_id": order['id'],
+        "user": user['name'],
+        "amount": 0,
+        "status": "cancelled",
+        "date": format_date(order['date']),
+    }
+
+
+STATUS_HANDLERS = {
+    OrderStatus.PAID.value: _paid_record,
+    OrderStatus.PENDING.value: _pending_record,
+    OrderStatus.CANCELLED.value: _cancelled_record,
+}
+
+
+def _process_order(order, users_by_id, products_by_id):
+    """Process one order. Returns (record, None) or (None, error)."""
+    user = users_by_id.get(order['user_id'])
+    if user is None:
+        return None, {"order_id": order['id'], "error": "user not found"}
+    if order['product_id'] not in products_by_id:
+        return None, {"order_id": order['id'], "error": "product not found"}
+    handler = STATUS_HANDLERS.get(order['status'])
+    if handler is None:
+        return None, {"order_id": order['id'],
+                      "error": f"unknown status: {order['status']}"}
+    return handler(order, user), None
+
+
 def proc(params=None):
     """process orders - main business flow"""
     orders = get_data("orders")
-    users = get_data("users")
-    products = get_data("products")
+    users_by_id = _index_by_id(get_data("users"))
+    products_by_id = _index_by_id(get_data("products"))
 
     result = []
     errors = []
@@ -42,71 +106,14 @@ def proc(params=None):
     total_tax = 0
 
     for o in orders:
-        # find user
-        u = None
-        for usr in users:
-            if usr['id'] == o['user_id']:
-                u = usr
-                break
-
-        if u is None:
-            errors.append({"order_id": o['id'], "error": "user not found"})
+        record, error = _process_order(o, users_by_id, products_by_id)
+        if error:
+            errors.append(error)
             continue
-
-        # find product
-        pr = None
-        for prod in products:
-            if prod['id'] == o['product_id']:
-                pr = prod
-                break
-
-        if pr is None:
-            errors.append({"order_id": o['id'], "error": "product not found"})
-            continue
-
-        # process based on status
-        if o['status'] == OrderStatus.PAID:
-            tax = calculate_tax(o['amount'], u['role'])
-            discount = get_discount(o['amount'], u['role'])
-            net = o['amount'] - discount - tax
-            total_revenue += net
-            total_tax += tax
-            result.append({
-                "order_id": o['id'],
-                "user": u['name'],
-                "amount": o['amount'],
-                "discount": discount,
-                "tax": tax,
-                "net": net,
-                "status": "processed",
-                "date": format_date(o['date'])
-            })
-
-        elif o['status'] == OrderStatus.PENDING:
-            # pending orders - just log
-            result.append({
-                "order_id": o['id'],
-                "user": u['name'],
-                "amount": o['amount'],
-                "status": "pending",
-                "date": format_date(o['date'])
-            })
-
-        elif o['status'] == OrderStatus.CANCELLED:
-            # cancelled - skip but log
-            result.append({
-                "order_id": o['id'],
-                "user": u['name'],
-                "amount": 0,
-                "status": "cancelled",
-                "date": format_date(o['date'])
-            })
-
-        else:
-            errors.append({
-                "order_id": o['id'],
-                "error": f"unknown status: {o['status']}"
-            })
+        if record['status'] == 'processed':
+            total_revenue += record['net']
+            total_tax += record['tax']
+        result.append(record)
 
     summary = {
         "processed": len([r for r in result if r['status'] == 'processed']),
